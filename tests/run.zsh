@@ -79,12 +79,11 @@ if [[ -n \${STANDIN_GONE-} ]]; then
 fi
 exec env -i HOME=${(qq)WORK}/there PATH=\"\$PATH\" zsh -fc \"\${@[-1]}\"" > $WORK/bin/ssh
 	chmod +x $WORK/bin/ssh
-	write_config '# Where git runs\n\ntarget_hostname = "target-host"'
+	write_target target-host
 
 	unset -m 'GIT_*'
 	export PATH=$WORK/bin:$WORK/real:$PATH
 	export XDG_CONFIG_HOME=$WORK/config
-	export HOST=elsewhere-host
 }
 
 # $1: the config file's contents, with \n for newlines
@@ -92,10 +91,20 @@ write_config() {
 	print -- $1 > $WORK/config/git-elsewhere/config
 }
 
+# Writes a config, with comments and spaces, that names a target host.
+# $1: the target's name, or "this host" for the host the tests run on
+write_target() {
+	local target=$1
+	if [[ $target == "this host" ]]; then
+		target=$(</proc/sys/kernel/hostname)
+	fi
+	write_config "# Where git runs\n\ntarget_hostname = \"$target\""
+}
+
 # Runs a command with no input, and sets REPLY to what the stand-ins logged,
 # then its output, then its exit status.
 # $1: the directory to run it in, relative to $WORK
-# $2...: the command, e.g. `env HOST=target-host git status`
+# $2...: the command, e.g. `env GIT_DIR=x git status`
 run() {
 	local dir=$1
 	shift
@@ -129,7 +138,9 @@ there git in $WORK/synced: []
   GIT_ELSEWHERE_FORWARDED=1
 exit 0"
 
-	run synced env HOST=target-host git status
+	write_target "this host"
+	run synced git status
+	write_target target-host
 	check "on target_hostname, git runs here" $REPLY \
 "here git in $WORK/synced: ['status']
 exit 0"
@@ -231,7 +242,9 @@ there clank-right in $WORK/plain: ['check']
   GIT_ELSEWHERE_FORWARDED=1
 exit 0"
 
-	run plain env HOST=target-host clank-right update .
+	write_target "this host"
+	run plain clank-right update .
+	write_target target-host
 	check "on target_hostname, clank-right runs here" $REPLY \
 "here clank-right in $WORK/plain: ['update' '.']
 exit 0"

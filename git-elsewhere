@@ -226,7 +226,8 @@ main() {
 	fi
 
 	read_target_hostname
-	if [[ $HOST == $REPLY ]]; then
+	# Not $HOST, which an exported HOST overrides
+	if [[ $REPLY == $(</proc/sys/kernel/hostname) ]]; then
 		exec_local $name $self "$@"
 	fi
 	exec_remote $REPLY ${PWD:P} $name "$@"
