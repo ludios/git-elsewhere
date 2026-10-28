@@ -210,7 +210,7 @@ exit 0"
 }
 
 test_local_subcommands() {
-	write_config 'target_hostname="target-host"\nlocal_subcommands=" push\tfetch "'
+	write_config 'target_hostname="target-host"\nlocal_subcommands=" push\tls-remote "'
 	run plain git -c push.default=current -C ../synced push origin
 	check "a subcommand in local_subcommands runs here, even in a Syncthing folder" $REPLY \
 "here git in $WORK/plain: ['-c' 'push.default=current' '-C' '../synced' 'push' 'origin']
@@ -220,6 +220,13 @@ exit 0"
 	check "only the subcommand counts, not the arguments after it" $REPLY \
 "ssh to target-host (-T)
 there git in $WORK/synced: ['log' 'push']
+  GIT_ELSEWHERE_FORWARDED=1
+exit 0"
+
+	run synced git
+	check "git with no subcommand still runs there" $REPLY \
+"ssh to target-host (-T)
+there git in $WORK/synced: []
   GIT_ELSEWHERE_FORWARDED=1
 exit 0"
 
@@ -322,7 +329,7 @@ exit 128"
 "git-elsewhere: $WORK/config/git-elsewhere/config:2: unknown setting target_port
 exit 128"
 
-	write_config 'target_hostname="target-host"\nlocal_subcommands="push, fetch"'
+	write_config 'target_hostname="target-host"\nlocal_subcommands="push, ls-remote"'
 	run synced git status
 	check "local_subcommands must be separated by spaces" $REPLY \
 "git-elsewhere: $WORK/config/git-elsewhere/config:2: expected git subcommands separated by spaces, not: push,

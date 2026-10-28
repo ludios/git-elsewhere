@@ -113,7 +113,7 @@ read_config() {
 	fi
 	typeset -g target_hostname=
 	typeset -ga local_subcommands=()
-	local line subcommand
+	local line word
 	local -i number=0
 	while IFS= read -r line || [[ -n $line ]]; do
 		(( ++number ))
@@ -129,10 +129,10 @@ read_config() {
 				;;
 			(local_subcommands)
 				local_subcommands=(${=match[2]})
-				for subcommand in $local_subcommands; do
+				for word in $local_subcommands; do
 					# Catches a list separated by commas
-					if [[ ! $subcommand =~ '^[[:alnum:]][[:alnum:]_.-]*$' ]]; then
-						die "$config:$number: expected git subcommands separated by spaces, not: $subcommand"
+					if [[ ! $word =~ '^[[:alnum:]][[:alnum:]_.-]*$' ]]; then
+						die "$config:$number: expected git subcommands separated by spaces, not: $word"
 					fi
 				done
 				;;

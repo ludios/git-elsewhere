@@ -53,10 +53,13 @@ keys, list them in the config, separated by spaces:
   An edit made here in that window turns into a Syncthing conflict copy.
 - **Local subcommands** see `.git` as Syncthing last delivered it, so a
   `git push` right after a `git commit` can push the commit before it, or fail
-  on objects that haven't arrived yet. What they write here, like the
-  `refs/remotes/` that `push` updates, goes to the target the same way, so
-  list only ones that write little: never `fetch` or `pull`. The subcommand
-  counts as typed, so an alias of `push` still runs on the target.
+  on objects that haven't arrived yet. They and their hooks (e.g. a
+  `pre-push` that runs `git status`) write here, and whatever they write
+  goes to the target the same way, clashing with what the target writes to
+  the same files meanwhile: for `push`, a ref under `refs/remotes/`, and
+  `.git/config` with `-u`. So list only ones that write little, never
+  `fetch` or `pull`. The subcommand counts as typed, so an alias of `push`
+  still runs on the target.
 - **Paths** must be the same on both hosts, with symlinks resolved. The
   directory a command runs from has to exist on the target too, and files
   named in arguments, like `git commit -F /tmp/msg`, are read and written
