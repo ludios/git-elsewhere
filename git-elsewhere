@@ -186,9 +186,13 @@ exec_remote() {
 		-o ServerAliveCountMax=3
 		-o LogLevel=ERROR
 	)
-	# With a terminal on both ends, the far side can page its output and prompt
-	if [[ -t 0 && -t 1 ]]; then
+	# With a terminal for input, output, and errors, the far side gets one too,
+	# for its pager and prompts. Without one, ssh mustn't read keys typed for
+	# something else, like the pager reading this command's output.
+	if [[ -t 0 && -t 1 && -t 2 ]]; then
 		ssh+=(-t)
+	elif [[ -t 0 ]]; then
+		ssh+=(-T -n)
 	else
 		ssh+=(-T)
 	fi
