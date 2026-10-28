@@ -171,11 +171,19 @@ exec_remote() {
 	# Status 1 from git can be an answer, e.g. from `git diff --quiet`, so a missing directory gets 128
 	local command="cd ${(qq)dir} || exit 128; export ${(j: :)exports}; exec ${(qq)name} ${(j: :)${(@qq)@}}"
 
+	# $XDG_RUNTIME_DIR is gone once the last login ends, even if a tmux session lives on
+	local socket_dir=${XDG_RUNTIME_DIR-}
+	if [[ ! -d $socket_dir ]]; then
+		socket_dir=$HOME/.ssh
+	fi
 	local -a ssh=(
 		ssh
 		-o ControlMaster=auto
-		-o "ControlPath=${XDG_RUNTIME_DIR:-$HOME/.ssh}/git-elsewhere-%C"
+		-o "ControlPath=$socket_dir/git-elsewhere-%C"
 		-o ControlPersist=10m
+		-o ConnectTimeout=10
+		-o ServerAliveInterval=10
+		-o ServerAliveCountMax=3
 		-o LogLevel=ERROR
 	)
 	# With a terminal on both ends, the far side can page its output and prompt
