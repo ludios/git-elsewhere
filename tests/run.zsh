@@ -73,6 +73,10 @@ if (( \${@[(I)-t]} )); then
 	tty=-t
 fi
 print -r -- \"ssh to \${@[\${@[(i)--]} + 1]} (\$tty)\" >> ${(qq)LOG}
+# Makes a directory missing on the target
+if [[ -n \${STANDIN_GONE-} ]]; then
+	rmdir \$STANDIN_GONE
+fi
 exec env -i HOME=${(qq)WORK}/there PATH=\"\$PATH\" zsh -fc \"\${@[-1]}\"" > $WORK/bin/ssh
 	chmod +x $WORK/bin/ssh
 	write_config '# Where git runs\n\ntarget_hostname = "target-host"'
@@ -237,6 +241,13 @@ test_errors() {
 	run plain git-elsewhere status
 	check "run under its own name, it refuses" $REPLY \
 "git-elsewhere: run this through a symlink named git or clank-right, not as git-elsewhere
+exit 128"
+
+	mkdir $WORK/synced/gone
+	run synced/gone env STANDIN_GONE=$WORK/synced/gone git diff --quiet
+	check "a directory missing there is a fatal error, not git's status 1" $REPLY \
+"ssh to target-host (-T)
+zsh:cd:1: no such file or directory: $WORK/synced/gone
 exit 128"
 
 	mkdir $WORK/synced/gone

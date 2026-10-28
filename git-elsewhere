@@ -168,7 +168,8 @@ exec_remote() {
 	done
 	# Last, so that it wins: the far side must run the real command, not forward it again
 	exports+=(GIT_ELSEWHERE_FORWARDED=1)
-	local command="cd ${(qq)dir} && export ${(j: :)exports} && exec ${(qq)name} ${(j: :)${(@qq)@}}"
+	# Status 1 from git can be an answer, e.g. from `git diff --quiet`, so a missing directory gets 128
+	local command="cd ${(qq)dir} || exit 128; export ${(j: :)exports}; exec ${(qq)name} ${(j: :)${(@qq)@}}"
 
 	local -a ssh=(
 		ssh
