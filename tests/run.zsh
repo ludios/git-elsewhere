@@ -167,10 +167,10 @@ there git in $WORK/synced/repo/sub: ['-C' '..' 'status']
   GIT_ELSEWHERE_FORWARDED=1
 exit 0"
 
-	run plain git --attr-source HEAD -C ../synced status
-	check "the value of --attr-source isn't taken for the subcommand" $REPLY \
+	run plain git --attr-source HEAD --shallow-file x -C ../synced status
+	check "the values of --attr-source and --shallow-file aren't taken for the subcommand" $REPLY \
 "ssh to target-host (-T)
-there git in $WORK/plain: ['--attr-source' 'HEAD' '-C' '../synced' 'status']
+there git in $WORK/plain: ['--attr-source' 'HEAD' '--shallow-file' 'x' '-C' '../synced' 'status']
   GIT_ELSEWHERE_FORWARDED=1
 exit 0"
 

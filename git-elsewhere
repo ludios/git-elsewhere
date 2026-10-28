@@ -74,7 +74,7 @@ parse_git_options() {
 			(--git-dir=*|--work-tree=*)
 				named+=("${1#*=}")
 				;;
-			(--git-dir|--work-tree|-c|--config-env|--namespace|--attr-source)
+			(--git-dir|--work-tree|-c|--config-env|--namespace|--attr-source|--shallow-file)
 				if (( $# < 2 )); then
 					break
 				fi
