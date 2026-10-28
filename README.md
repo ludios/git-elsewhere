@@ -15,7 +15,8 @@ input, and output:
 - `git`, when it would work inside a Syncthing folder: its directory, after
   any `-C` options, or a repository or work tree named by `--git-dir`,
   `--work-tree`, `GIT_DIR`, or `GIT_WORK_TREE`, holds a `.stfolder` or is below
-  one. Elsewhere, it runs the real `git` right here.
+  one. Elsewhere, or with a subcommand in `local_subcommands`, it runs the
+  real `git` right here.
 - `clank-right`, always, since it works on the synced repositories in its
   `projects.txt` wherever it runs from. It writes `AGENTS.md` and commits it at
   once, which only works on the host whose git does the committing.
@@ -38,6 +39,11 @@ both commands, in a directory ahead of the real ones on `PATH`:
 On the target, the forwarded command runs with `$HOME/bin` first on `PATH`, so
 that's where the real `clank-right` has to be.
 
+To run some git subcommands here anyway, e.g. a `push` that needs this host's
+keys, list them in the config, separated by spaces:
+
+	local_subcommands="push"
+
 ## Behaviour to know about
 
 - **Syncthing's delay.** The target sees this host's edits only once Syncthing
@@ -45,6 +51,12 @@ that's where the real `clank-right` has to be.
   after an edit can miss it; and changes that git makes to files (`checkout`,
   `reset`, `stash`, `rebase`) reach this host 1–2 s after the command returns.
   An edit made here in that window turns into a Syncthing conflict copy.
+- **Local subcommands** see `.git` as Syncthing last delivered it, so a
+  `git push` right after a `git commit` can push the commit before it, or fail
+  on objects that haven't arrived yet. What they write here, like the
+  `refs/remotes/` that `push` updates, goes to the target the same way, so
+  list only ones that write little: never `fetch` or `pull`. The subcommand
+  counts as typed, so an alias of `push` still runs on the target.
 - **Paths** must be the same on both hosts, with symlinks resolved. The
   directory a command runs from has to exist on the target too, and files
   named in arguments, like `git commit -F /tmp/msg`, are read and written

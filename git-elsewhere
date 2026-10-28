@@ -8,7 +8,8 @@
 # directory:
 #
 # - git, when it would work inside a Syncthing folder (a directory holding a
-#   .stfolder, or below one);
+#   .stfolder, or below one), unless its subcommand is one of the config's
+#   local_subcommands;
 # - clank-right always, since it works on the synced repositories in its
 #   projects.txt wherever it runs from.
 #
@@ -42,14 +43,16 @@ in_synced_folder() {
 	return 1
 }
 
-# Sets reply to the paths that git would work in, going by its global options,
-# the ones before its subcommand: its directory after any -C options, and the
-# repository and work tree that --bare, --git-dir, --work-tree, GIT_DIR, or
-# GIT_WORK_TREE names.
+# Goes by git's global options, the ones before its subcommand. Sets reply to
+# the paths that git would work in: its directory after any -C options, and
+# the repository and work tree that --bare, --git-dir, --work-tree, GIT_DIR,
+# or GIT_WORK_TREE names. Sets REPLY to the subcommand, as typed, or to
+# nothing if there's none.
 # $@: git's arguments
-git_paths() {
+parse_git_options() {
 	local dir=$PWD
 	local -a named=(${GIT_DIR-} ${GIT_WORK_TREE-})
+	REPLY=
 	while (( $# )); do
 		case $1 in
 			(-C)
@@ -83,6 +86,7 @@ git_paths() {
 			(-*)
 				;;
 			(*)
+				REPLY=$1
 				break
 				;;
 		esac
@@ -100,13 +104,16 @@ git_paths() {
 	done
 }
 
-# Sets REPLY to target_hostname from the config file.
-read_target_hostname() {
+# Sets target_hostname, and local_subcommands to the git subcommands that run
+# here anyway, from the config file.
+read_config() {
 	local config=${XDG_CONFIG_HOME:-$HOME/.config}/git-elsewhere/config
 	if [[ ! -r $config ]]; then
 		die "can't read $config, which should have a line like target_hostname=\"xclank\""
 	fi
-	local line target=
+	typeset -g target_hostname=
+	typeset -ga local_subcommands=()
+	local line subcommand
 	local -i number=0
 	while IFS= read -r line || [[ -n $line ]]; do
 		(( ++number ))
@@ -118,17 +125,25 @@ read_target_hostname() {
 		fi
 		case $match[1] in
 			(target_hostname)
-				target=$match[2]
+				target_hostname=$match[2]
+				;;
+			(local_subcommands)
+				local_subcommands=(${=match[2]})
+				for subcommand in $local_subcommands; do
+					# Catches a list separated by commas
+					if [[ ! $subcommand =~ '^[[:alnum:]][[:alnum:]_.-]*$' ]]; then
+						die "$config:$number: expected git subcommands separated by spaces, not: $subcommand"
+					fi
+				done
 				;;
 			(*)
 				die "$config:$number: unknown setting $match[1]"
 				;;
 		esac
 	done < $config
-	if [[ -z $target ]]; then
+	if [[ -z $target_hostname ]]; then
 		die "$config doesn't set target_hostname"
 	fi
-	REPLY=$target
 }
 
 # Runs the real command: the first one on PATH that isn't this script.
@@ -213,8 +228,8 @@ main() {
 	fi
 
 	if [[ $name == git ]]; then
-		git_paths "$@"
-		local synced=false git_path
+		parse_git_options "$@"
+		local subcommand=$REPLY synced=false git_path
 		for git_path in $reply; do
 			if in_synced_folder $git_path; then
 				synced=true
@@ -225,12 +240,15 @@ main() {
 		fi
 	fi
 
-	read_target_hostname
+	read_config
 	# Not $HOST, which an exported HOST overrides
-	if [[ $REPLY == $(</proc/sys/kernel/hostname) ]]; then
+	if [[ $target_hostname == $(</proc/sys/kernel/hostname) ]]; then
 		exec_local $name $self "$@"
 	fi
-	exec_remote $REPLY ${PWD:P} $name "$@"
+	if [[ $name == git ]] && (( ${local_subcommands[(Ie)$subcommand]} )); then
+		exec_local $name $self "$@"
+	fi
+	exec_remote $target_hostname ${PWD:P} $name "$@"
 }
 
 main "$0" "$@"

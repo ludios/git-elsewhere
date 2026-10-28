@@ -209,6 +209,36 @@ there git in $WORK/plain: ['status']
 exit 0"
 }
 
+test_local_subcommands() {
+	write_config 'target_hostname="target-host"\nlocal_subcommands=" push\tfetch "'
+	run plain git -c push.default=current -C ../synced push origin
+	check "a subcommand in local_subcommands runs here, even in a Syncthing folder" $REPLY \
+"here git in $WORK/plain: ['-c' 'push.default=current' '-C' '../synced' 'push' 'origin']
+exit 0"
+
+	run synced git log push
+	check "only the subcommand counts, not the arguments after it" $REPLY \
+"ssh to target-host (-T)
+there git in $WORK/synced: ['log' 'push']
+  GIT_ELSEWHERE_FORWARDED=1
+exit 0"
+
+	run synced git -c alias.p=push p
+	check "an alias of a local subcommand still runs there" $REPLY \
+"ssh to target-host (-T)
+there git in $WORK/synced: ['-c' 'alias.p=push' 'p']
+  GIT_ELSEWHERE_FORWARDED=1
+exit 0"
+
+	run plain clank-right push
+	write_target target-host
+	check "local_subcommands are git's, not clank-right's" $REPLY \
+"ssh to target-host (-T)
+there clank-right in $WORK/plain: ['push']
+  GIT_ELSEWHERE_FORWARDED=1
+exit 0"
+}
+
 test_forwarding() {
 	run synced env GIT_EDITOR=true GIT_EXEC_PATH=/nowhere GIT_STANDIN_EXIT=3 git commit
 	check "exported GIT_ variables go along, except GIT_EXEC_PATH, and the exit status comes back" $REPLY \
@@ -292,6 +322,12 @@ exit 128"
 "git-elsewhere: $WORK/config/git-elsewhere/config:2: unknown setting target_port
 exit 128"
 
+	write_config 'target_hostname="target-host"\nlocal_subcommands="push, fetch"'
+	run synced git status
+	check "local_subcommands must be separated by spaces" $REPLY \
+"git-elsewhere: $WORK/config/git-elsewhere/config:2: expected git subcommands separated by spaces, not: push,
+exit 128"
+
 	write_config '# nothing'
 	run synced git status
 	check "target_hostname is required" $REPLY \
@@ -303,6 +339,7 @@ main() {
 	set_up
 	test_git
 	test_git_options
+	test_local_subcommands
 	test_forwarding
 	test_clank_right
 	test_errors
