@@ -1,0 +1,228 @@
+#!/usr/bin/env -S zsh -f
+# Model-output: Claude Opus 5.5
+#
+# Runs git, or clank-right, on the one host that should write the .git
+# directories that Syncthing syncs between hosts. Linked as `git` and as
+# `clank-right` ahead of the real ones on PATH, it runs the command over ssh
+# on target_hostname, named in ~/.config/git-elsewhere/config, in the same
+# directory:
+#
+# - git, when it would work inside a Syncthing folder (a directory holding a
+#   .stfolder, or below one);
+# - clank-right always, since it works on the synced repositories in its
+#   projects.txt wherever it runs from.
+#
+# Anything else, and anything on target_hostname itself, runs the real command
+# right here.
+
+emulate -R zsh
+setopt no_unset
+
+# Ends the script like a fatal git error.
+# $1: what went wrong
+die() {
+	print -ru2 -- "git-elsewhere: $1"
+	exit 128
+}
+
+# $1: a path, which needn't exist
+# Returns 0 if the path is in a Syncthing folder.
+in_synced_folder() {
+	local dir=${1:A}
+	while true; do
+		if [[ -e $dir/.stfolder ]]; then
+			return 0
+		fi
+		if [[ $dir == / ]]; then
+			return 1
+		fi
+		dir=${dir:h}
+	done
+}
+
+# Reads git's global options, the ones before its subcommand, into these
+# variables of the caller:
+#   git_dir:   the directory git would work in, after its -C options
+#   git_args:  the arguments without those -C options, for running git in git_dir
+#   git_paths: git_dir, and the repository and work tree that an option,
+#              GIT_DIR, or GIT_WORK_TREE names
+# $@: git's arguments
+parse_git_options() {
+	git_dir=$PWD
+	git_args=()
+	local -a named=(${GIT_DIR-} ${GIT_WORK_TREE-})
+	while (( $# )); do
+		case $1 in
+			(-C)
+				if (( $# < 2 )); then
+					break
+				fi
+				# As in git, each -C is relative to the one before, and an empty one does nothing
+				if [[ $2 == /* ]]; then
+					git_dir=$2
+				elif [[ -n $2 ]]; then
+					git_dir=$git_dir/$2
+				fi
+				shift 2
+				continue
+				;;
+			(--git-dir=*|--work-tree=*)
+				named+=("${1#*=}")
+				;;
+			(--git-dir|--work-tree|-c|--namespace|--config-env)
+				if (( $# < 2 )); then
+					break
+				fi
+				if [[ $1 == (--git-dir|--work-tree) ]]; then
+					named+=("$2")
+				fi
+				git_args+=("$1")
+				shift
+				;;
+			(-*)
+				;;
+			(*)
+				break
+				;;
+		esac
+		git_args+=("$1")
+		shift
+	done
+	git_args+=("$@")
+
+	git_paths=($git_dir)
+	local named_path
+	for named_path in $named; do
+		if [[ $named_path == /* ]]; then
+			git_paths+=($named_path)
+		else
+			git_paths+=($git_dir/$named_path)
+		fi
+	done
+}
+
+# Sets REPLY to target_hostname from the config file.
+read_target_hostname() {
+	local config=${XDG_CONFIG_HOME:-$HOME/.config}/git-elsewhere/config
+	if [[ ! -r $config ]]; then
+		die "can't read $config, which should have a line like target_hostname=\"xclank\""
+	fi
+	local line target=
+	local -i number=0
+	while IFS= read -r line || [[ -n $line ]]; do
+		(( ++number ))
+		if [[ $line =~ '^[[:space:]]*(#.*)?$' ]]; then
+			continue
+		fi
+		if [[ ! $line =~ '^[[:space:]]*([a-z_]+)[[:space:]]*=[[:space:]]*"([^"]*)"[[:space:]]*$' ]]; then
+			die "$config:$number: expected name=\"value\", not: $line"
+		fi
+		case $match[1] in
+			(target_hostname)
+				target=$match[2]
+				;;
+			(*)
+				die "$config:$number: unknown setting $match[1]"
+				;;
+		esac
+	done < $config
+	if [[ -z $target ]]; then
+		die "$config doesn't set target_hostname"
+	fi
+	REPLY=$target
+}
+
+# Runs the real command: the first one on PATH that isn't this script.
+# $1: the command's name
+# $2: this script's path, with symlinks resolved
+# $3...: the command's arguments
+exec_local() {
+	local name=$1 self=$2
+	shift 2
+	local dir candidate
+	for dir in $path; do
+		candidate=$dir/$name
+		if [[ -f $candidate && -x $candidate && ${candidate:A} != $self ]]; then
+			exec $candidate "$@"
+		fi
+	done
+	die "found no $name on PATH besides git-elsewhere"
+}
+
+# Runs the command on another host over ssh, with this input and output and
+# the exported GIT_ variables. The connection stays open for 10 minutes, which
+# makes the next command take ~10 ms instead of ~110 ms.
+# $1: the host
+# $2: the directory to run it in
+# $3: the command's name
+# $4...: the command's arguments
+exec_remote() {
+	local host=$1 dir=$2 name=$3
+	shift 3
+	local -a exports=('PATH="$HOME/bin:$PATH"')
+	local var
+	for var in ${(ko)parameters[(I)GIT_*]}; do
+		# GIT_EXEC_PATH is where this host's git keeps its subcommands
+		if [[ ${parameters[$var]} == *-export* && $var != GIT_EXEC_PATH ]]; then
+			exports+=("$var=${(qq)${(P)var}}")
+		fi
+	done
+	# Last, so that it wins: the far side must run the real command, not forward it again
+	exports+=(GIT_ELSEWHERE_FORWARDED=1)
+	local command="cd ${(qq)dir} && export ${(j: :)exports} && exec ${(qq)name} ${(j: :)${(@qq)@}}"
+
+	local -a ssh=(
+		ssh
+		-o ControlMaster=auto
+		-o "ControlPath=${XDG_RUNTIME_DIR:-$HOME/.ssh}/git-elsewhere-%C"
+		-o ControlPersist=10m
+		-o LogLevel=ERROR
+	)
+	# With a terminal on both ends, the far side can page its output and prompt
+	if [[ -t 0 && -t 1 ]]; then
+		ssh+=(-t)
+	else
+		ssh+=(-T)
+	fi
+	exec $ssh -- $host $command
+}
+
+# $1: how this script was run, whose name says which command to run
+# $2...: the command's arguments
+main() {
+	local name=${1:t} self=${1:A}
+	shift
+	if [[ $name != (git|clank-right) ]]; then
+		die "run this through a symlink named git or clank-right, not as $name"
+	fi
+	if [[ -n ${GIT_ELSEWHERE_FORWARDED-} ]]; then
+		exec_local $name $self "$@"
+	fi
+
+	local dir=$PWD
+	local -a args=("$@")
+	if [[ $name == git ]]; then
+		local git_dir path_to_check
+		local -a git_args git_paths
+		parse_git_options "$@"
+		local synced=false
+		for path_to_check in $git_paths; do
+			if in_synced_folder $path_to_check; then
+				synced=true
+			fi
+		done
+		if [[ $synced == false ]]; then
+			exec_local $name $self "$@"
+		fi
+		dir=$git_dir
+		args=("${git_args[@]}")
+	fi
+
+	read_target_hostname
+	if [[ $HOST == $REPLY ]]; then
+		exec_local $name $self "$@"
+	fi
+	exec_remote $REPLY ${dir:A} $name "${args[@]}"
+}
+
+main "$0" "$@"
