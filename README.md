@@ -45,20 +45,30 @@ that's where the real `clank-right` has to be.
   after an edit can miss it; and changes that git makes to files (`checkout`,
   `reset`, `stash`, `rebase`) reach this host 1–2 s after the command returns.
   An edit made here in that window turns into a Syncthing conflict copy.
-- **Paths** must be the same on both hosts.
+- **Paths** must be the same on both hosts, with symlinks resolved. The
+  directory a command runs from has to exist on the target too, and files
+  named in arguments, like `git commit -F /tmp/msg`, are read and written
+  there.
 - **Environment.** Exported `GIT_` variables (e.g. `GIT_EDITOR`) go along,
   except `GIT_EXEC_PATH`, which points into this host's git; nothing else does.
+  One that names a program here, like VS Code's `GIT_ASKPASS`, has to work on
+  the target too.
 - **Input.** Like any ssh, a forwarded command reads its input even when it
-  doesn't need it, so in a `while read` loop, run it with `</dev/null`.
-- **Terminals.** When both input and output are a terminal, ssh gets one too,
-  for the pager, the editor, and prompts.
+  doesn't need it, so in a `while read` loop, run it with `</dev/null`. It
+  doesn't read a terminal, though, unless it gets one (next).
+- **Terminals.** When input, output, and errors are all a terminal, ssh gets
+  one too, for the pager, the editor, and prompts. Without one, Ctrl-C stops
+  ssh, but not the command on the target.
 - **Speed.** The ssh connection stays open for 10 minutes after use, so a
   forwarded command takes ~15 ms instead of ~100 ms.
 - **Failures.** If ssh fails, so does the command, with status 255, rather than
-  running here and bringing back the writes from two hosts. The script's own
-  errors, such as a missing config, exit with 128, like git's fatal errors.
-- Tools that read or write `.git` without running `git` (libgit2, gitoxide)
-  bypass all of this.
+  running here and bringing back the writes from two hosts; it gives up after
+  10 s without an answer. The script's own errors, such as a missing config or
+  a directory missing on the target, exit with 128, like git's fatal errors.
+- **What isn't covered.** Tools that read or write `.git` without running our
+  `git` (libgit2, gitoxide, git's hooks and `!` aliases, which find git's own
+  directory first on `PATH`), and `git init` or `git clone` into a Syncthing
+  folder from outside one, still work here.
 
 ## Development
 
