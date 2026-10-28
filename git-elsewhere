@@ -28,8 +28,9 @@ die() {
 # $1: a path, which needn't exist
 # Returns 0 if the path is in a Syncthing folder.
 in_synced_folder() {
-	local dir=${1:A}
-	while true; do
+	# Resolved like chdir would: a symlink before the `..` after it
+	local dir=${1:P}
+	while [[ $dir == /* ]]; do
 		if [[ -e $dir/.stfolder ]]; then
 			return 0
 		fi
@@ -38,18 +39,16 @@ in_synced_folder() {
 		fi
 		dir=${dir:h}
 	done
+	return 1
 }
 
-# Reads git's global options, the ones before its subcommand, into these
-# variables of the caller:
-#   git_dir:   the directory git would work in, after its -C options
-#   git_args:  the arguments without those -C options, for running git in git_dir
-#   git_paths: git_dir, and the repository and work tree that an option,
-#              GIT_DIR, or GIT_WORK_TREE names
+# Sets reply to the paths that git would work in, going by its global options,
+# the ones before its subcommand: its directory after any -C options, and the
+# repository and work tree that --bare, --git-dir, --work-tree, GIT_DIR, or
+# GIT_WORK_TREE names.
 # $@: git's arguments
-parse_git_options() {
-	git_dir=$PWD
-	git_args=()
+git_paths() {
+	local dir=$PWD
 	local -a named=(${GIT_DIR-} ${GIT_WORK_TREE-})
 	while (( $# )); do
 		case $1 in
@@ -59,24 +58,26 @@ parse_git_options() {
 				fi
 				# As in git, each -C is relative to the one before, and an empty one does nothing
 				if [[ $2 == /* ]]; then
-					git_dir=$2
+					dir=$2
 				elif [[ -n $2 ]]; then
-					git_dir=$git_dir/$2
+					dir=$dir/$2
 				fi
-				shift 2
-				continue
+				shift
+				;;
+			(--bare)
+				# git takes the directory it's in at this point as the repository
+				named+=($dir)
 				;;
 			(--git-dir=*|--work-tree=*)
 				named+=("${1#*=}")
 				;;
-			(--git-dir|--work-tree|-c|--namespace|--config-env)
+			(--git-dir|--work-tree|-c|--config-env|--namespace|--attr-source)
 				if (( $# < 2 )); then
 					break
 				fi
 				if [[ $1 == (--git-dir|--work-tree) ]]; then
 					named+=("$2")
 				fi
-				git_args+=("$1")
 				shift
 				;;
 			(-*)
@@ -85,18 +86,16 @@ parse_git_options() {
 				break
 				;;
 		esac
-		git_args+=("$1")
 		shift
 	done
-	git_args+=("$@")
 
-	git_paths=($git_dir)
+	reply=($dir)
 	local named_path
 	for named_path in $named; do
 		if [[ $named_path == /* ]]; then
-			git_paths+=($named_path)
+			reply+=($named_path)
 		else
-			git_paths+=($git_dir/$named_path)
+			reply+=($dir/$named_path)
 		fi
 	done
 }
@@ -142,7 +141,7 @@ exec_local() {
 	local dir candidate
 	for dir in $path; do
 		candidate=$dir/$name
-		if [[ -f $candidate && -x $candidate && ${candidate:A} != $self ]]; then
+		if [[ -f $candidate && -x $candidate && ${candidate:P} != $self ]]; then
 			exec $candidate "$@"
 		fi
 	done
@@ -190,39 +189,34 @@ exec_remote() {
 # $1: how this script was run, whose name says which command to run
 # $2...: the command's arguments
 main() {
-	local name=${1:t} self=${1:A}
+	local name=${1:t} self=${1:P}
 	shift
 	if [[ $name != (git|clank-right) ]]; then
 		die "run this through a symlink named git or clank-right, not as $name"
 	fi
-	if [[ -n ${GIT_ELSEWHERE_FORWARDED-} ]]; then
+	# zsh sets PWD to . when the working directory is gone, which git reports better
+	if [[ -n ${GIT_ELSEWHERE_FORWARDED-} || $PWD != /* ]]; then
 		exec_local $name $self "$@"
 	fi
 
-	local dir=$PWD
-	local -a args=("$@")
 	if [[ $name == git ]]; then
-		local git_dir path_to_check
-		local -a git_args git_paths
-		parse_git_options "$@"
-		local synced=false
-		for path_to_check in $git_paths; do
-			if in_synced_folder $path_to_check; then
+		git_paths "$@"
+		local synced=false git_path
+		for git_path in $reply; do
+			if in_synced_folder $git_path; then
 				synced=true
 			fi
 		done
 		if [[ $synced == false ]]; then
 			exec_local $name $self "$@"
 		fi
-		dir=$git_dir
-		args=("${git_args[@]}")
 	fi
 
 	read_target_hostname
 	if [[ $HOST == $REPLY ]]; then
 		exec_local $name $self "$@"
 	fi
-	exec_remote $REPLY ${dir:A} $name "${args[@]}"
+	exec_remote $REPLY ${PWD:P} $name "$@"
 }
 
 main "$0" "$@"

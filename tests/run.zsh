@@ -58,6 +58,7 @@ exit \${GIT_STANDIN_EXIT:-0}" > $1
 # plain directory, and the config.
 set_up() {
 	mkdir -p $WORK/{bin,real,there/bin,config/git-elsewhere,synced/.stfolder,synced/repo/sub,plain}
+	ln -s $WORK/synced/repo/sub $WORK/plain/link
 	ln -s $ROOT/git-elsewhere $WORK/bin/git
 	ln -s $ROOT/git-elsewhere $WORK/bin/clank-right
 	ln -s $ROOT/git-elsewhere $WORK/bin/git-elsewhere
@@ -138,9 +139,30 @@ exit 0"
 
 test_git_options() {
 	run plain git -c alias.st=status -C ../synced -C '' -C repo st -C x
-	check "-C options choose the directory there, and only global ones count" $REPLY \
+	check "global -C options say where git works, and they go along unchanged" $REPLY \
 "ssh to target-host (-T)
-there git in $WORK/synced/repo: ['-c' 'alias.st=status' 'st' '-C' 'x']
+there git in $WORK/plain: ['-c' 'alias.st=status' '-C' '../synced' '-C' '' '-C' 'repo' 'st' '-C' 'x']
+  GIT_ELSEWHERE_FORWARDED=1
+exit 0"
+
+	run plain/link git -C .. status
+	check "a -C .. goes up from where a symlink leads, as chdir does" $REPLY \
+"ssh to target-host (-T)
+there git in $WORK/synced/repo/sub: ['-C' '..' 'status']
+  GIT_ELSEWHERE_FORWARDED=1
+exit 0"
+
+	run plain git --attr-source HEAD -C ../synced status
+	check "the value of --attr-source isn't taken for the subcommand" $REPLY \
+"ssh to target-host (-T)
+there git in $WORK/plain: ['--attr-source' 'HEAD' '-C' '../synced' 'status']
+  GIT_ELSEWHERE_FORWARDED=1
+exit 0"
+
+	run synced/repo git --bare -C ../../plain status
+	check "--bare takes the directory before a later -C as the repository" $REPLY \
+"ssh to target-host (-T)
+there git in $WORK/synced/repo: ['--bare' '-C' '../../plain' 'status']
   GIT_ELSEWHERE_FORWARDED=1
 exit 0"
 
@@ -216,6 +238,12 @@ test_errors() {
 	check "run under its own name, it refuses" $REPLY \
 "git-elsewhere: run this through a symlink named git or clank-right, not as git-elsewhere
 exit 128"
+
+	mkdir $WORK/synced/gone
+	: > $LOG
+	(cd $WORK/synced/gone && rmdir $WORK/synced/gone && git status >> $LOG 2>&1)
+	check "a working directory that's gone here leaves git to complain here" "$(grep -c '^ssh' $LOG; grep -c '^here git' $LOG)" "0
+1"
 
 	rm $WORK/config/git-elsewhere/config
 	run plain git status
